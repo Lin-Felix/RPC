@@ -1,5 +1,9 @@
-package Study;
+package Study.consumer;
 
+import Study.message.Request;
+import Study.codec.RequestEncoder;
+import Study.message.Response;
+import Study.codec.SSDecoder;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
@@ -7,9 +11,6 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.LineBasedFrameDecoder;
-import io.netty.handler.codec.string.StringDecoder;
-import io.netty.handler.codec.string.StringEncoder;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -30,21 +31,25 @@ public class Consumer {
                     @Override
                     protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                         nioSocketChannel.pipeline()
-                                .addLast(new LineBasedFrameDecoder(1024))
-                                .addLast(new StringDecoder())
-                                .addLast(new StringEncoder())
-                                .addLast(new SimpleChannelInboundHandler<String>() {
+                                .addLast(new SSDecoder())
+                                .addLast(new RequestEncoder())
+                                .addLast(new SimpleChannelInboundHandler<Response>() {
                                     @Override
-                                    protected void channelRead0(ChannelHandlerContext channelHandlerContext, String s) throws Exception {
-                                        int result = Integer.parseInt(s);
+                                    protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response response) throws Exception {
+                                        System.out.println(response);
+                                        int result = Integer.valueOf(response.getResult().toString());
                                         addResultFuture.complete(result);
-                                        channelHandlerContext.close();
                                     }
                                 });
                     }
                 });
         ChannelFuture channelFuture = bootstrap.connect("localhost",7777).sync();
-        channelFuture.channel().writeAndFlush("add," + a + "," + b + "\n");
+        Request request = new Request();
+        request.setServiceName("bbbb");
+        request.setMethodName("aaa");
+        request.setParams(new Object[]{1, 2});
+        request.setParamsClass(new String[]{"int", "int"});
+        channelFuture.channel().writeAndFlush(request);
         return addResultFuture.get();
     }
 }
