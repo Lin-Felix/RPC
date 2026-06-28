@@ -1,6 +1,7 @@
 package Study.consumer;
 
 import Study.api.Add;
+import Study.exception.RpcException;
 import Study.message.Request;
 import Study.codec.RequestEncoder;
 import Study.message.Response;
@@ -14,6 +15,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author lzk
@@ -38,8 +40,11 @@ public class Consumer implements Add  {
                                     .addLast(new SimpleChannelInboundHandler<Response>() {
                                         @Override
                                         protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response response) throws Exception {
-                                            System.out.println(response);
-                                            addResultFuture.complete(Integer.valueOf(response.getResult().toString()));
+                                            if (200 == response.getCode()) {
+                                                addResultFuture.complete(Integer.valueOf(response.getResult().toString()));
+                                            } else {
+                                                addResultFuture.completeExceptionally(new RpcException(response.getErrorMessage()));
+                                            }
                                         }
                                     });
                         }
@@ -51,7 +56,7 @@ public class Consumer implements Add  {
             request.setParams(new Object[]{a, b});
             request.setParamsClass(new Class[]{int.class, int.class});
             channelFuture.channel().writeAndFlush(request);
-            return addResultFuture.get();
+            return addResultFuture.get(3, TimeUnit.SECONDS); // 超时处理，仅等待3s
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

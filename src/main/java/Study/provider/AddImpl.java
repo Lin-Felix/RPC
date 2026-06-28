@@ -2,6 +2,9 @@ package Study.provider;
 
 import Study.api.Add;
 
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
+
 /**
  * @author lzk
  * @date 2026/6/26 16:26
@@ -10,6 +13,7 @@ import Study.api.Add;
 public class AddImpl implements Add {
     @Override
     public int add(int a, int b) {
+        LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(1));
         return a + b;
     }
 }
