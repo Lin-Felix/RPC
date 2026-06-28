@@ -66,7 +66,7 @@ public class ProviderServer {
             ProviderRegistry.Invocation<?> invocation = registry.findService(request.getServiceName()); //
             // 从注册表获取服务实例（即类实例）
             if (null == invocation) {
-                Response failResp = Response.fail(String.format("%s 没有对应的服务", request.getServiceName()));
+                Response failResp = Response.fail(String.format("%s 没有对应的服务", request.getServiceName()), request.getRequestId());
                 channelHandlerContext.writeAndFlush(failResp);
                 return;
             }
@@ -74,9 +74,9 @@ public class ProviderServer {
                 Object result = invocation.invoke(request.getMethodName(), request.getParamsClass(),
                         request.getParams());
                 log.info("{}，函数被调用了{}，结果是{}", request.getServiceName(), request.getMethodName(), result);
-                channelHandlerContext.writeAndFlush(Response.success(result));
+                channelHandlerContext.writeAndFlush(Response.success(result, request.getRequestId()));
             } catch (Exception e) {
-                Response failResp = Response.fail(e.getMessage());
+                Response failResp = Response.fail(e.getMessage(), request.getRequestId());
                 channelHandlerContext.writeAndFlush(failResp);
             }
         }
