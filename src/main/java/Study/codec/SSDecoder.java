@@ -3,13 +3,13 @@ package Study.codec;
 import Study.message.Message;
 import Study.message.Request;
 import Study.message.Response;
-import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.fastjson2.JSONReader;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -53,10 +53,10 @@ public class SSDecoder extends LengthFieldBasedFrameDecoder {
     }
 
     public Request deserializeRequest(byte[] body) {
-        return JSONObject.parseObject(new String(body), Request.class);
+        return JSONObject.parseObject(new String(body, StandardCharsets.UTF_8), Request.class, JSONReader.Feature.SupportClassForName);
     }
 
     public Response deserializeResponse(byte[] body) {
-        return JSONObject.parseObject(new String(body), Response.class);
+        return JSONObject.parseObject(new String(body, StandardCharsets.UTF_8), Response.class);
     }
 }

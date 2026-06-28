@@ -9,8 +9,8 @@ import lombok.Data;
  */
 @Data
 public class Request {
-    private String serviceName;
+    private String serviceName; // 服务名，本质是类名
     private String methodName;
-    private String[] paramsClass;
+    private Class<?>[] paramsClass; // 参数类型
     private Object[] params;
 }

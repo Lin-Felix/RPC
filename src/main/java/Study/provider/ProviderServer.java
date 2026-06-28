@@ -18,13 +18,22 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 public class ProviderServer {
     private final int port;
 
+    private final ProviderRegistry registry; // 注册表
+
     private EventLoopGroup bossEventLoopGroup;
 
     private EventLoopGroup workerEventLoopGroup;
 
     public ProviderServer(int port) {
         this.port = port;
+        this.registry = new ProviderRegistry();
     }
+
+    // 将函数注册至注册表
+    public <I> void register(Class<I> interfaceClass, I serviceInstance) {
+        registry.register(interfaceClass, serviceInstance);
+    }
+
 
     // 启动服务器
     public void start() {
@@ -40,15 +49,18 @@ public class ProviderServer {
                             nioSocketChannel.pipeline()
                                     .addLast(new SSDecoder())
                                     .addLast(new ResponseEncoder())
-                                    .addLast(new SimpleChannelInboundHandler<Request>() {
+                                    .addLast(new ChannelHandler[]{new SimpleChannelInboundHandler<Request>() {
                                         @Override
                                         protected void channelRead0(ChannelHandlerContext channelHandlerContext, Request request) throws Exception {
-                                            System.out.println(request);
+                                            ProviderRegistry.Invocation<?> service =
+                                                    registry.findService(request.getServiceName()); // 从注册表获取服务实例（即类实例）
+                                            Object result = service.invoke(request.getMethodName(), request.getParamsClass(),
+                                                    request.getParams());
                                             Response response = new Response();
-                                            response.setResult(1);
+                                            response.setResult(result);
                                             channelHandlerContext.writeAndFlush(response);
                                         }
-                                    });
+                                    }});
                         }
                     });
             serverBootstrap.bind(port).sync();
@@ -67,7 +79,4 @@ public class ProviderServer {
         }
     }
 
-    private static int add(int a, int b) {
-        return a + b;
-    }
 }
