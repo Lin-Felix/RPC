@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 public class ConnectionManager {
-    private final Map<String, ChannelWrapper> channelTable = new ConcurrentHashMap<>(); // todo: 为什么用final修饰
+    private final Map<String, ChannelWrapper> channelTable = new ConcurrentHashMap<>();
 
     private final Bootstrap bootstrap;
 
@@ -28,7 +28,7 @@ public class ConnectionManager {
         String key = host + ":" + port;
         ChannelWrapper channelWrapper = channelTable.computeIfAbsent(key, (k) -> {
             try {
-                ChannelFuture channelFuture = bootstrap.connect(host, port).sync();
+                ChannelFuture channelFuture = bootstrap.connect(host, port).sync(); // 同步的方式建立连接
                 Channel channel = channelFuture.channel();
                 channel.closeFuture().addListener((f) -> channelTable.remove(key)); // 当监听到连接关闭时，移除连接
                 return new ChannelWrapper(channel);

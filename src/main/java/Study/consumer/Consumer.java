@@ -14,6 +14,7 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -25,9 +26,10 @@ import java.util.concurrent.TimeUnit;
  * @date 2026/6/23 14:36
  * @description 消费者
  */
+@Slf4j
 public class Consumer implements Add  {
     // 在途请求
-    private Map<Integer, CompletableFuture<?>> inFlightRequestTable = new ConcurrentHashMap<>(); // key为requestId，value为响应
+    private Map<Integer, CompletableFuture<Response>> inFlightRequestTable = new ConcurrentHashMap<>(); // key为requestId，value为响应
 
     private ConnectionManager manager = new ConnectionManager(creatBootStrap());
 
@@ -44,12 +46,12 @@ public class Consumer implements Add  {
                                 .addLast(new SimpleChannelInboundHandler<Response>() {
                                     @Override
                                     protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response response) throws Exception {
-                                        CompletableFuture requestFuture = inFlightRequestTable.remove(response.getRequestId()); // 移除完成响应的在途请求
-                                        if (200 == response.getCode()) {
-                                            requestFuture.complete(Integer.valueOf(response.getResult().toString()));
-                                        } else {
-                                            requestFuture.completeExceptionally(new RpcException(response.getErrorMessage()));
+                                        CompletableFuture<Response> responseFuture = inFlightRequestTable.remove(response.getRequestId()); // 移除完成响应的在途请求
+                                        if (null == responseFuture) {
+                                            log.warn("request Id{}找不到", response.getResult());
+                                            return;
                                         }
+                                        responseFuture.complete(response);
                                     }
                                 });
                     }
@@ -59,8 +61,8 @@ public class Consumer implements Add  {
 
     public int add(int a, int b) {
         try {
-            CompletableFuture<Integer> addResultFuture = new CompletableFuture<>();
-            Channel channel = manager.getChannel("localhost", 7777);
+            CompletableFuture<Response> responseFuture = new CompletableFuture<>();
+            Channel channel = manager.getChannel("localhost", 7777); // 函数内部同步建立连接
             if (null == channel) {
                 throw new RpcException("provider连接失败");
             }
@@ -70,11 +72,49 @@ public class Consumer implements Add  {
             request.setParams(new Object[]{a, b});
             request.setParamsClass(new Class[]{int.class, int.class});
             channel.writeAndFlush(request).addListener(f->{
-                if (f.isSuccess()) {
-                    inFlightRequestTable.put(request.getRequestId(), addResultFuture);
+                if (f.isSuccess()) { // 如果请求发送成功，则保存至在途请求表中维护
+                    inFlightRequestTable.put(request.getRequestId(), responseFuture);
                 }
             });
-            return addResultFuture.get(3, TimeUnit.SECONDS); // 超时处理，仅等待3s
+            Response response = responseFuture.get(3, TimeUnit.SECONDS);// 超时处理，仅等待3s
+            if (200 == response.getCode()) {
+                return (Integer) response.getResult();
+            } else {
+                throw new RpcException(response.getErrorMessage());
+            }
+        } catch (RpcException rpcException) {
+            throw rpcException;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public int minus(int a, int b) {
+        try {
+            CompletableFuture<Response> responseFuture = new CompletableFuture<>();
+            Channel channel = manager.getChannel("localhost", 7777); // 函数内部同步建立连接
+            if (null == channel) {
+                throw new RpcException("provider连接失败");
+            }
+            Request request = new Request();
+            request.setServiceName(Add.class.getName());
+            request.setMethodName("minus");
+            request.setParams(new Object[]{a, b});
+            request.setParamsClass(new Class[]{int.class, int.class});
+            channel.writeAndFlush(request).addListener(f->{
+                if (f.isSuccess()) { // 如果请求发送成功，则保存至在途请求表中维护
+                    inFlightRequestTable.put(request.getRequestId(), responseFuture);
+                }
+            });
+            Response response = responseFuture.get(3, TimeUnit.SECONDS);// 超时处理，仅等待3s
+            if (200 == response.getCode()) {
+                return (Integer) response.getResult();
+            } else {
+                throw new RpcException(response.getErrorMessage());
+            }
+        } catch (RpcException rpcException) {
+            throw rpcException;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

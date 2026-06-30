@@ -16,4 +16,9 @@ public class AddImpl implements Add {
         LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(1));
         return a + b;
     }
+
+    @Override
+    public int minus(int a, int b) {
+        return a - b;
+    }
 }

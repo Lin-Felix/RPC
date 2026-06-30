@@ -7,4 +7,6 @@ package Study.api; // 消费者和提供者共享的接口契约包
  */
 public interface Add {
     int add(int a, int b);
+
+    int minus(int a, int b);
 }
