@@ -70,8 +70,7 @@ public class ConsumerProxyFactory {
      * @param <I>
      */
     public <I> I createConsumerProxy(Class<I> interfaceClass) {
-        return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(),
-                new Class[]{Add.class}, // 被代理的接口
+        return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(), new Class[]{interfaceClass}, // 被代理的接口
                 new InvocationHandler() { // 被增强的逻辑
                     @Override
                     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable { // 代理对象，代理对象被调用的函数，被调用函数的参数
@@ -98,9 +97,10 @@ public class ConsumerProxyFactory {
                             request.setMethodName(method.getName());
                             request.setParams(args);
                             request.setParamsClass(method.getParameterTypes());
+                            inFlightRequestTable.put(request.getRequestId(), responseFuture);
                             channel.writeAndFlush(request).addListener(f->{
-                                if (f.isSuccess()) { // 如果请求发送成功，则保存至在途请求表中维护
-                                    inFlightRequestTable.put(request.getRequestId(), responseFuture);
+                                if (!f.isSuccess()) { // 如果请求发送失败，将在途请求从表中移除
+                                    inFlightRequestTable.remove(request.getRequestId());
                                 }
                             });
                             Response response = responseFuture.get(3, TimeUnit.SECONDS);// 超时处理，仅等待3s
