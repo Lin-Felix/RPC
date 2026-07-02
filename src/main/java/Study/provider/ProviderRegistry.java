@@ -41,7 +41,7 @@ public class ProviderRegistry {
         }
 
         public Object invoke(String methodName, Class<?>[] paramsClass, Object[] params) throws Exception {
-            Method invokeMethod = interfaceClass.getDeclaredMethod(methodName, paramsClass);
+            Method invokeMethod = interfaceClass.getDeclaredMethod(methodName, paramsClass); // 通过反射调用方法
             return invokeMethod.invoke(serviceInstance, params);
         }
     }
