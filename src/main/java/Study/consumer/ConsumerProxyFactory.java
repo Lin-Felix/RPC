@@ -1,11 +1,14 @@
 package Study.consumer;
 
-import Study.api.Add;
 import Study.codec.RequestEncoder;
 import Study.codec.SSDecoder;
 import Study.exception.RpcException;
 import Study.message.Request;
 import Study.message.Response;
+import Study.register.DefaultServiceRegistry;
+import Study.register.RegistryConfig;
+import Study.register.ServiceMetadata;
+import Study.register.ServiceRegistry;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -18,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,6 +39,13 @@ public class ConsumerProxyFactory {
 
     // 在途请求
     private final Map<Integer, CompletableFuture<Response>> inFlightRequestTable = new ConcurrentHashMap<>(); // key为requestId，value为响应
+
+    private final ServiceRegistry registry;
+
+    public ConsumerProxyFactory(RegistryConfig registryConfig) throws Exception {
+        this.registry = new DefaultServiceRegistry(); // 通过工厂模式创建注册中心
+        this.registry.init(registryConfig);
+    }
 
     private Bootstrap creatBootStrap() {
         Bootstrap bootstrap = new Bootstrap();
@@ -88,7 +99,12 @@ public class ConsumerProxyFactory {
                         }
                         try {
                             CompletableFuture<Response> responseFuture = new CompletableFuture<>();
-                            Channel channel = manager.getChannel("localhost", 7777); // 函数内部同步建立连接
+                            List<ServiceMetadata> serviceMetadata = registry.fetchServiceList(interfaceClass.getName()); // 从注册中心拿到服务
+                            if (serviceMetadata.isEmpty()) {
+                                throw new RpcException(interfaceClass.getName() + "没有对应的provider");
+                            }
+                            ServiceMetadata providerMetadata = serviceMetadata.get(0);
+                            Channel channel = manager.getChannel(providerMetadata.getHost(), providerMetadata.getPort()); // 函数内部同步建立连接
                             if (null == channel) {
                                 throw new RpcException("provider连接失败");
                             }
@@ -101,6 +117,7 @@ public class ConsumerProxyFactory {
                             channel.writeAndFlush(request).addListener(f->{
                                 if (!f.isSuccess()) { // 如果请求发送失败，将在途请求从表中移除
                                     inFlightRequestTable.remove(request.getRequestId());
+                                    responseFuture.completeExceptionally(f.cause());
                                 }
                             });
                             Response response = responseFuture.get(3, TimeUnit.SECONDS);// 超时处理，仅等待3s

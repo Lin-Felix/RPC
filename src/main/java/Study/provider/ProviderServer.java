@@ -4,6 +4,10 @@ import Study.message.Request;
 import Study.codec.ResponseEncoder;
 import Study.codec.SSDecoder;
 import Study.message.Response;
+import Study.register.DefaultServiceRegistry;
+import Study.register.RegistryConfig;
+import Study.register.ServiceMetadata;
+import Study.register.ServiceRegistry;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -18,17 +22,28 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class ProviderServer {
+    private final String host;
+
     private final int port;
 
     private final ProviderRegistry registry; // 注册表
+
+    private final RegistryConfig registryConfig; // 注册中心的配置类
+
+    private final ServiceRegistry serviceRegistry; // 注册中心
 
     private EventLoopGroup bossEventLoopGroup;
 
     private EventLoopGroup workerEventLoopGroup;
 
-    public ProviderServer(int port) {
+
+
+    public ProviderServer(String host, int port, RegistryConfig registryConfig) {
+        this.host = host;
         this.port = port;
         this.registry = new ProviderRegistry();
+        this.registryConfig = registryConfig;
+        this.serviceRegistry = new DefaultServiceRegistry();
     }
 
     // 将函数注册至注册表
@@ -42,6 +57,7 @@ public class ProviderServer {
         bossEventLoopGroup = new NioEventLoopGroup();
         workerEventLoopGroup = new NioEventLoopGroup(4);
         try {
+            this.serviceRegistry.init(registryConfig); // 注册中心初始化
             ServerBootstrap serverBootstrap = new ServerBootstrap();
             serverBootstrap.group(bossEventLoopGroup, workerEventLoopGroup)
                     .channel(NioServerSocketChannel.class)
@@ -55,9 +71,19 @@ public class ProviderServer {
                         }
                     });
             serverBootstrap.bind(port).sync();
+            // map(this::buildMetadata)等价于map(name -> buildMetadata(name))
+            registry.allServiceName().stream().map(this::buildMetadata).forEach(this.serviceRegistry::registerService); // 将注册表的服务注册至注册中心中
         } catch (Exception e) {
             throw new RuntimeException("服务器启动异常", e);
         }
+    }
+
+    private ServiceMetadata buildMetadata(String serviceName) {
+        ServiceMetadata serviceMetadata = new ServiceMetadata();
+        serviceMetadata.setHost(host);
+        serviceMetadata.setPort(port);
+        serviceMetadata.setServiceName(serviceName);
+        return serviceMetadata;
     }
 
     public class ProviderHandler extends SimpleChannelInboundHandler<Request> {

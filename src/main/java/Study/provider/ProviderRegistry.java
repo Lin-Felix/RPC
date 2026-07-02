@@ -1,6 +1,8 @@
 package Study.provider;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -10,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @description 服务注册表（不是注册中心），保存可被调用的函数
  */
 public class ProviderRegistry {
-    private Map<String, Invocation<?>> serviceInstanceMap = new ConcurrentHashMap<>();
+    private final Map<String, Invocation<?>> serviceInstanceMap = new ConcurrentHashMap<>();
 
     /**
      *
@@ -29,6 +31,10 @@ public class ProviderRegistry {
 
     public Invocation<?> findService(String serviceName) {
         return serviceInstanceMap.get(serviceName);
+    }
+
+    public List<String> allServiceName() {
+        return new ArrayList<>(this.serviceInstanceMap.keySet());
     }
 
     public static class Invocation<I> {
