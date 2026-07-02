@@ -32,24 +32,30 @@ public class SSDecoder extends LengthFieldBasedFrameDecoder {
      */
     @Override
     protected Object decode(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
-        ByteBuf frame = (ByteBuf) super.decode(ctx, in);
-        Message message = new Message();
-
-        byte[] logic = new byte[Message.LOGIC.length];
-        frame.readBytes(logic);
-        if (!Arrays.equals(logic, Message.LOGIC)) {
-            throw new IllegalArgumentException("魔数不对！协议有问题");
+        ByteBuf frame = (ByteBuf) super.decode(ctx, in); // ByteBuf指向计算机直接内存，需要手动回收内存
+        if (null == frame) {
+            return null;
         }
-        byte messageType = frame.readByte();
-        byte[] body = new byte[frame.readableBytes()];
-        frame.readBytes(body);
-        if (Objects.equals(Message.MessageType.REQUEST.getCode(), messageType)) {
-            return deserializeRequest(body);
+        try {
+            Message message = new Message();
+            byte[] magic = new byte[Message.MAGIC.length];
+            frame.readBytes(magic);
+            if (!Arrays.equals(magic, Message.MAGIC)) {
+                throw new IllegalArgumentException("魔数不对！协议有问题");
+            }
+            byte messageType = frame.readByte();
+            byte[] body = new byte[frame.readableBytes()];
+            frame.readBytes(body);
+            if (Objects.equals(Message.MessageType.REQUEST.getCode(), messageType)) {
+                return deserializeRequest(body);
+            }
+            if (Objects.equals(Message.MessageType.RESPONSE.getCode(), messageType)) {
+                return deserializeResponse(body);
+            }
+            throw new IllegalArgumentException("消息类型不支持" + messageType);
+        } finally {
+            frame.release();
         }
-        if (Objects.equals(Message.MessageType.RESPONSE.getCode(), messageType)) {
-            return deserializeResponse(body);
-        }
-        throw new IllegalArgumentException("消息类型不支持" + messageType);
     }
 
     public Request deserializeRequest(byte[] body) {

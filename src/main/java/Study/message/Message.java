@@ -10,9 +10,9 @@ import java.nio.charset.StandardCharsets;
  */
 @Data
 public class Message {
-    public static final byte[] LOGIC = "生生".getBytes(StandardCharsets.UTF_8);
+    public static final byte[] MAGIC = "生生".getBytes(StandardCharsets.UTF_8);
 
-    private byte[] logic;
+    private byte[] magic;
 
     private byte messageType;
 

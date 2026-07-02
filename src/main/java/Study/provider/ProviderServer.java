@@ -22,13 +22,9 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class ProviderServer {
-    private final String host;
-
-    private final int port;
+    private final ProviderProperties providerProperties;
 
     private final ProviderRegistry registry; // 注册表
-
-    private final RegistryConfig registryConfig; // 注册中心的配置类
 
     private final ServiceRegistry serviceRegistry; // 注册中心
 
@@ -38,11 +34,9 @@ public class ProviderServer {
 
 
 
-    public ProviderServer(String host, int port, RegistryConfig registryConfig) {
-        this.host = host;
-        this.port = port;
+    public ProviderServer(ProviderProperties providerProperties) {
+        this.providerProperties = providerProperties;
         this.registry = new ProviderRegistry();
-        this.registryConfig = registryConfig;
         this.serviceRegistry = new DefaultServiceRegistry();
     }
 
@@ -55,9 +49,9 @@ public class ProviderServer {
     // 启动服务器
     public void start() {
         bossEventLoopGroup = new NioEventLoopGroup();
-        workerEventLoopGroup = new NioEventLoopGroup(4);
+        workerEventLoopGroup = new NioEventLoopGroup(providerProperties.getWorkThreadNum());
         try {
-            this.serviceRegistry.init(registryConfig); // 注册中心初始化
+            this.serviceRegistry.init(providerProperties.getRegistryConfig()); // 注册中心初始化
             ServerBootstrap serverBootstrap = new ServerBootstrap();
             serverBootstrap.group(bossEventLoopGroup, workerEventLoopGroup)
                     .channel(NioServerSocketChannel.class)
@@ -70,7 +64,7 @@ public class ProviderServer {
                                     .addLast(new ProviderHandler());
                         }
                     });
-            serverBootstrap.bind(port).sync();
+            serverBootstrap.bind(providerProperties.getHost(), providerProperties.getPort()).sync();
             // map(this::buildMetadata)等价于map(name -> buildMetadata(name))
             registry.allServiceName().stream().map(this::buildMetadata).forEach(this.serviceRegistry::registerService); // 将注册表的服务注册至注册中心中
         } catch (Exception e) {
@@ -80,8 +74,8 @@ public class ProviderServer {
 
     private ServiceMetadata buildMetadata(String serviceName) {
         ServiceMetadata serviceMetadata = new ServiceMetadata();
-        serviceMetadata.setHost(host);
-        serviceMetadata.setPort(port);
+        serviceMetadata.setHost(providerProperties.getHost());
+        serviceMetadata.setPort(providerProperties.getPort());
         serviceMetadata.setServiceName(serviceName);
         return serviceMetadata;
     }

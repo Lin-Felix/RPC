@@ -18,12 +18,12 @@ public class RequestEncoder extends MessageToByteEncoder<Request> {
 
     @Override
     protected void encode(ChannelHandlerContext ctx, Request msg, ByteBuf out) throws Exception {
-        byte[] logic = Message.LOGIC;
+        byte[] magic = Message.MAGIC;
         byte messageType = Message.MessageType.REQUEST.getCode();
         byte[] body = serializeRequest(msg);
-        int length = logic.length + Byte.BYTES + body.length;
+        int length = magic.length + Byte.BYTES + body.length;
         out.writeInt(length);
-        out.writeBytes(logic);
+        out.writeBytes(magic);
         out.writeByte(messageType);
         out.writeBytes(body);
     }
