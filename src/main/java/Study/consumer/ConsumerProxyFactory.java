@@ -3,10 +3,12 @@ package Study.consumer;
 import Study.codec.RequestEncoder;
 import Study.codec.SSDecoder;
 import Study.exception.RpcException;
+import Study.loadbalance.LoadBalancer;
+import Study.loadbalance.RandomLoadBalancer;
+import Study.loadbalance.RoundRobinLoadBalancer;
 import Study.message.Request;
 import Study.message.Response;
 import Study.register.DefaultServiceRegistry;
-import Study.register.RegistryConfig;
 import Study.register.ServiceMetadata;
 import Study.register.ServiceRegistry;
 import io.netty.bootstrap.Bootstrap;
@@ -81,16 +83,31 @@ public class ConsumerProxyFactory {
     public <I> I createConsumerProxy(Class<I> interfaceClass) {
         return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(),
                 new Class[]{interfaceClass}, // 被代理的接口
-                new ConsumerInvocationHandler(interfaceClass)/** 被增强的逻辑 **/);
+                new ConsumerInvocationHandler(interfaceClass, createLoadBalancer())/** 被增强的逻辑 **/);
+    }
+
+    private LoadBalancer createLoadBalancer() {
+        switch (this.consumerProperties.getLoadBalancePolicy()) {
+            case "robin":
+                return new RoundRobinLoadBalancer();
+            case "random":
+                return new RandomLoadBalancer();
+            default:
+                throw new IllegalArgumentException(this.consumerProperties.getLoadBalancePolicy() + "负载均衡不支持");
+
+        }
     }
 
 
     public class ConsumerInvocationHandler implements InvocationHandler  {
 
-        private Class<?> interfaceClass;
+        private final Class<?> interfaceClass;
 
-        public ConsumerInvocationHandler(Class<?> interfaceClass) {
+        private final LoadBalancer loadBalancer;
+
+        public ConsumerInvocationHandler(Class<?> interfaceClass, LoadBalancer loadBalancer) {
             this.interfaceClass = interfaceClass;
+            this.loadBalancer = loadBalancer;
         }
 
         @Override
@@ -104,7 +121,7 @@ public class ConsumerProxyFactory {
                 if (serviceMetadata.isEmpty()) {
                     throw new RpcException(interfaceClass.getName() + "没有对应的provider");
                 }
-                ServiceMetadata providerMetadata = serviceMetadata.get(0);
+                ServiceMetadata providerMetadata = loadBalancer.select(serviceMetadata); // 负载均衡
                 Channel channel = manager.getChannel(providerMetadata.getHost(), providerMetadata.getPort()); // 函数内部同步建立连接
                 if (null == channel) {
                     throw new RpcException("provider连接失败");

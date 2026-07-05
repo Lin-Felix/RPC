@@ -17,6 +17,7 @@ public class DefaultServiceRegistry implements ServiceRegistry {
 
     private ServiceRegistry delegate;
 
+    // 缓存:key为ServiceName, value为List<ServiceMetadata>
     private final Map<String, List<ServiceMetadata>> cache = new ConcurrentHashMap<>();
 
     @Override
@@ -37,7 +38,7 @@ public class DefaultServiceRegistry implements ServiceRegistry {
             List<ServiceMetadata> serviceMetadata = delegate.fetchServiceList(serviceName);
             cache.put(serviceName, serviceMetadata);
             return serviceMetadata;
-        } catch (Exception e) {
+        } catch (Exception e) { // 若注册中心掉线,从缓存中拿到服务的元信息
             log.error("{}注册中心查询{}出现异常", delegate.getClass().getSimpleName(), serviceName, e);
             return cache.getOrDefault(serviceName, new ArrayList<>());
         }
