@@ -15,7 +15,7 @@ public class ProviderApp {
         registryConfig.setConnectString("127.0.0.1:2181");
         ProviderProperties providerProperties = new ProviderProperties();
         providerProperties.setHost("127.0.0.1");
-        providerProperties.setPort(7777);
+        providerProperties.setPort(7779);
         providerProperties.setRegistryConfig(registryConfig);
         ProviderServer providerServer = new ProviderServer(providerProperties);
         providerServer.register(Add.class, new AddImpl());

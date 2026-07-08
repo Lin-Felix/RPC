@@ -14,7 +14,7 @@ public class Request {
 
     private static final AtomicInteger REQUEST_COUNTER = new AtomicInteger(); // 全局计数器
 
-    private int requestId = REQUEST_COUNTER.getAndDecrement();
+    private int requestId = REQUEST_COUNTER.getAndIncrement();
     private String serviceName; // 服务名，本质是类名
     private String methodName;
     private Class<?>[] paramsClass; // 参数类型

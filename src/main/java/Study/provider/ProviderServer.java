@@ -91,9 +91,15 @@ public class ProviderServer {
                 return;
             }
             try {
+                long startTime = System.currentTimeMillis();
                 Object result = invocation.invoke(request.getMethodName(), request.getParamsClass(),
                         request.getParams());
-                log.info("{}，函数被调用了{}，结果是{}", request.getServiceName(), request.getMethodName(), result);
+                log.info("requestId:{}，函数被调用了{}，结果是{}，耗时是{}",
+                        request.getRequestId(),
+                        request.getServiceName(),
+                        request.getMethodName(),
+                        result,
+                        System.currentTimeMillis() - startTime);
                 channelHandlerContext.writeAndFlush(Response.success(result, request.getRequestId()));
             } catch (Exception e) {
                 Response failResp = Response.fail(e.getMessage(), request.getRequestId());

@@ -2,6 +2,7 @@ package Study.provider;
 
 import Study.api.Add;
 
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
@@ -13,7 +14,8 @@ import java.util.concurrent.locks.LockSupport;
 public class AddImpl implements Add {
     @Override
     public int add(int a, int b) {
-        LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(1));
+        Random random = new Random();
+
         return a + b;
     }
 
