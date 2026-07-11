@@ -18,7 +18,7 @@ public class Message {
 
     private byte[] body;
 
-    public enum MessageType {
+    public enum MessageType { // 避免代码中出现魔法值
         REQUEST(1), RESPONSE(2), ;
 
         private final byte code;

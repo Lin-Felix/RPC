@@ -32,7 +32,9 @@ public class SSDecoder extends LengthFieldBasedFrameDecoder {
      */
     @Override
     protected Object decode(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
-        ByteBuf frame = (ByteBuf) super.decode(ctx, in); // ByteBuf指向计算机直接内存，需要手动回收内存
+        // ① 让 Netty 根据消息长度处理半包、粘包，得到一条完整消息；LengthFieldBasedFrameDecoder的decode()会利用消息头中的“长度字段”划分完整消息
+        // ② ByteBuf指向计算机直接内存，需要手动回收内存
+        ByteBuf frame = (ByteBuf) super.decode(ctx, in);
         if (null == frame) {
             return null;
         }
