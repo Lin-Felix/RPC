@@ -9,4 +9,8 @@ public class RpcException extends RuntimeException {
     public RpcException(String message) {
         super(message);
     }
+
+    public boolean retry() { // todo 为什么要有这个函数
+        return true;
+    }
 }

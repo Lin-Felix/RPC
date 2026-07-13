@@ -3,6 +3,7 @@ package Study.consumer;
 import Study.codec.RequestEncoder;
 import Study.codec.SSDecoder;
 import Study.exception.RpcException;
+import Study.limit.RateLimiter;
 import Study.loadbalance.LoadBalancer;
 import Study.loadbalance.RandomLoadBalancer;
 import Study.loadbalance.RoundRobinLoadBalancer;
@@ -49,41 +50,20 @@ public class ConsumerProxyFactory {
 
     private final ConnectionManager manager;
 
-    // 在途请求
-    private final Map<Integer, CompletableFuture<Response>> inFlightRequestTable; // key为requestId，value为响应
-
     private final ServiceRegistry registry;
 
     private final ConsumerProperties consumerProperties;
 
-    private final HashedWheelTimer timeoutTimer; // 时间轮：用于处理过期任务
+    private InFlightRequestManager inFlightRequestManager;
 
     public ConsumerProxyFactory(ConsumerProperties consumerProperties) throws Exception {
         this.consumerProperties = consumerProperties;
         this.registry = new DefaultServiceRegistry(); // 通过工厂模式创建注册中心
+        this.inFlightRequestManager = new InFlightRequestManager(consumerProperties);
         this.registry.init(consumerProperties.getRegistryConfig());
-        this.manager = new ConnectionManager(creatBootStrap(consumerProperties));
-        this.inFlightRequestTable = new ConcurrentHashMap<>();
-        this.timeoutTimer = new HashedWheelTimer(1, TimeUnit.SECONDS, 64);
-    }
+        this.manager = new ConnectionManager(inFlightRequestManager, consumerProperties);
 
-    private Bootstrap creatBootStrap(ConsumerProperties consumerProperties) {
-        Bootstrap bootstrap = new Bootstrap();
-        bootstrap.group(new NioEventLoopGroup(consumerProperties.getWorkThreadNum()))
-                .channel(NioSocketChannel.class)
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, consumerProperties.getConnectTimeoutMs())
-                .handler(new ChannelInitializer<NioSocketChannel>() {
-                    @Override
-                    protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
-                        nioSocketChannel.pipeline()
-                                .addLast(new SSDecoder())
-                                .addLast(new RequestEncoder())
-                                .addLast(new ConsumerHandler());
-                    }
-                });
-        return bootstrap;
     }
-
 
     /**
      *
@@ -154,21 +134,33 @@ public class ConsumerProxyFactory {
                 CompletableFuture<Response> requestFuture = callRpcAsync(request, providerMetadata); // 备注：callRpcAsync的responseFuture和requestFuture本质是一个东西
                 response = requestFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
             } catch (Exception e) {
-                // 重试逻辑
-                long methodTimeoutMs = consumerProperties.getMethodTimeoutMs() - (System.currentTimeMillis() - startTime);
-                if (methodTimeoutMs <= 0) {
-                    throw new TimeoutException();
-                }
-                RetryContext retryContext = new RetryContext();
-                retryContext.setFailService(providerMetadata);
-                retryContext.setServiceMetadataList(serviceMetadata);
-                retryContext.setMethodTimeoutMs(methodTimeoutMs);
-                retryContext.setRequestTimeoutMs(consumerProperties.getRequestTimeoutMs());
-                retryContext.setLoadBalancer(this.loadBalancer);
-                retryContext.setDoRpcFunction(provider -> callRpcAsync(buildRequst(method, args), provider));
-                response = this.retryPolicy.retry(retryContext);
+                response = doRetry(method, args, e, startTime, providerMetadata, serviceMetadata);
             }
             return processResponse(response);
+        }
+
+        // 重试
+        private Response doRetry(Method method, Object[] args, Exception e, long startTime, ServiceMetadata providerMetadata, List<ServiceMetadata> serviceMetadata) throws Exception {
+            // 若异步任务失败的原因是“不允许重试”的RpcException，就直接抛出该异常
+            if (e instanceof ExecutionException ee && ee.getCause() instanceof RpcException rpcException && !rpcException.retry()) {
+                throw rpcException;
+            }
+            Response response;
+            // 重试逻辑
+            long methodTimeoutMs = consumerProperties.getMethodTimeoutMs() - (System.currentTimeMillis() - startTime);
+            if (methodTimeoutMs <= 0) {
+                throw new TimeoutException();
+            }
+            log.warn("rpc出现异常进行重试", e);
+            RetryContext retryContext = new RetryContext();
+            retryContext.setFailService(providerMetadata);
+            retryContext.setServiceMetadataList(serviceMetadata);
+            retryContext.setMethodTimeoutMs(methodTimeoutMs);
+            retryContext.setRequestTimeoutMs(consumerProperties.getRequestTimeoutMs());
+            retryContext.setLoadBalancer(this.loadBalancer);
+            retryContext.setDoRpcFunction(provider -> callRpcAsync(buildRequst(method, args), provider));
+            response = this.retryPolicy.retry(retryContext);
+            return response;
         }
 
         /**
@@ -178,25 +170,16 @@ public class ConsumerProxyFactory {
          * @return
          */
         private CompletableFuture<Response> callRpcAsync(Request request, ServiceMetadata provider) {
-            CompletableFuture<Response> responseFuture = new CompletableFuture<>();
-            Channel channel = manager.getChannel(provider.getHost(), provider.getPort()); // 函数内部同步建立连接
+            CompletableFuture<Response> responseFuture = inFlightRequestManager
+                    .inFlightRequest(
+                        request,
+                        consumerProperties.getRequestTimeoutMs(),
+                        provider);
+            Channel channel = manager.getChannel(provider); // 函数内部同步建立连接
             if (null == channel) {
                 responseFuture.completeExceptionally(new RpcException(new String("provider连接失败")));
                 return responseFuture;
             }
-
-            inFlightRequestTable.put(request.getRequestId(), responseFuture);
-
-            // 设置定时任务：若超过请求超时时间，将 responseFuture 标记为异常完成
-            Timeout timeout = timeoutTimer.newTimeout((t) -> responseFuture.completeExceptionally(new TimeoutException()),
-                    consumerProperties.getRequestTimeoutMs(),
-                    TimeUnit.MILLISECONDS);
-
-            // 无论任务正常/异常完成，将request从在途请求表中删除
-            responseFuture.whenComplete((r, e) -> {
-                inFlightRequestTable.remove(request.getRequestId());
-                timeout.cancel();
-            });
 
             channel.writeAndFlush(request).addListener(f -> {
                 log.info("发送了request:{}", request.getRequestId());
@@ -235,35 +218,6 @@ public class ConsumerProxyFactory {
                 return System.identityHashCode(proxy);
             }
             throw new UnsupportedOperationException(method.getName());
-        }
-    }
-
-    private class ConsumerHandler extends SimpleChannelInboundHandler<Response> {
-        @Override
-        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response response) throws Exception {
-            CompletableFuture<Response> responseFuture = inFlightRequestTable.remove(response.getRequestId()); // 移除完成响应的在途请求
-            if (null == responseFuture) {
-                log.warn("request Id {}找不到", response.getRequestId());
-                return;
-            }
-            responseFuture.complete(response);
-        }
-
-        @Override
-        public void channelActive(ChannelHandlerContext ctx) throws Exception {
-            log.info("地址:{}连接了", ctx.channel().remoteAddress());
-        }
-
-        @Override
-        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-            log.info("地址:{} 断开了连接", ctx.channel().remoteAddress());
-            ctx.fireChannelInactive();
-        }
-
-        @Override
-        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-            log.error("发生了异常", cause);
-            ctx.channel().close();
         }
     }
 }

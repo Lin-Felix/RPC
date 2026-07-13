@@ -13,5 +13,7 @@ public class ProviderProperties {
     private String host;
     private int port;
     private int workThreadNum = 4;
+    private int globalMaxRequest = 10; // 可承受的总并发
+    private int perConsumerMaxRequest = 5; // 每个消费者最大的请求
     private RegistryConfig registryConfig;
 }

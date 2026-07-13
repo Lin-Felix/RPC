@@ -16,5 +16,7 @@ public class ConsumerProperties {
     private Integer methodTimeoutMs = 10000; // 函数超时时间（包含请求时间 + 等待重试时间 + 重试请求的时间）
     private String loadBalancePolicy = "robin"; // 负载均衡策略
     private String retryPolicy = "forking"; // 重试策略
+    private int rpcPerSecond = 10; // 每秒调用10个rpc请求
+    private int rpcPerChannel = 5; // 每个Channel每秒调用5个rpc请求
     private RegistryConfig registryConfig = new RegistryConfig();
 }
