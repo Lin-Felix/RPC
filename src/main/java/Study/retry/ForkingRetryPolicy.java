@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * @author lzk
  * @date 2026/7/8 17:42
- * @description
+ * @description 重试接口的实现类：请求对冲重试
  */
 public class ForkingRetryPolicy implements RetryPolicy {
     @Override
