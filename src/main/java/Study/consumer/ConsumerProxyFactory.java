@@ -1,5 +1,7 @@
 package Study.consumer;
 
+import Study.breaker.CircuitBreaker;
+import Study.breaker.CircuitBreakerManager;
 import Study.codec.RequestEncoder;
 import Study.codec.SSDecoder;
 import Study.exception.RpcException;
@@ -9,6 +11,7 @@ import Study.loadbalance.RandomLoadBalancer;
 import Study.loadbalance.RoundRobinLoadBalancer;
 import Study.message.Request;
 import Study.message.Response;
+import Study.metrics.RpcCallMetrics;
 import Study.register.DefaultServiceRegistry;
 import Study.register.ServiceMetadata;
 import Study.register.ServiceRegistry;
@@ -28,10 +31,12 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.util.HashedWheelTimer;
 import io.netty.util.Timeout;
 import lombok.extern.slf4j.Slf4j;
+import org.checkerframework.checker.nullness.qual.NonNull;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -54,7 +59,9 @@ public class ConsumerProxyFactory {
 
     private final ConsumerProperties consumerProperties;
 
-    private InFlightRequestManager inFlightRequestManager;
+    private final InFlightRequestManager inFlightRequestManager;
+
+    private final CircuitBreakerManager circuitBreakerManager;
 
     public ConsumerProxyFactory(ConsumerProperties consumerProperties) throws Exception {
         this.consumerProperties = consumerProperties;
@@ -62,7 +69,7 @@ public class ConsumerProxyFactory {
         this.inFlightRequestManager = new InFlightRequestManager(consumerProperties);
         this.registry.init(consumerProperties.getRegistryConfig());
         this.manager = new ConnectionManager(inFlightRequestManager, consumerProperties);
-
+        this.circuitBreakerManager = new CircuitBreakerManager(consumerProperties);
     }
 
     /**
@@ -122,45 +129,85 @@ public class ConsumerProxyFactory {
             if (method.getDeclaringClass() == Object.class) {
                 return invokeObjectMethod(proxy, method, args);
             }
-            long startTime = System.currentTimeMillis();
-            List<ServiceMetadata> serviceMetadata = registry.fetchServiceList(interfaceClass.getName()); // 从注册中心拿到服务元数据
-            if (serviceMetadata.isEmpty()) {
-                throw new RpcException(interfaceClass.getName() + "没有对应的provider");
-            }
-            ServiceMetadata providerMetadata = loadBalancer.select(serviceMetadata); // 负载均衡
+            List<ServiceMetadata> serviceMetadata = new ArrayList<>(registry.fetchServiceList(interfaceClass.getName())); // 从注册中心拿到服务元数据
+            ServiceMetadata provider = decideProvider(serviceMetadata);
             Request request = buildRequst(method, args);
             Response response;
+            RpcCallMetrics metrics = RpcCallMetrics.createRpcCallMetrics(method, args, provider);
+            CircuitBreaker breaker = circuitBreakerManager.createOrGetBreaker(provider);
             try {
-                CompletableFuture<Response> requestFuture = callRpcAsync(request, providerMetadata); // 备注：callRpcAsync的responseFuture和requestFuture本质是一个东西
+                CompletableFuture<Response> requestFuture = callRpcAsync(request, provider); // 备注：callRpcAsync的responseFuture和requestFuture本质是一个东西
                 response = requestFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
+                metrics.complete(response);
+                breaker.recordRpc(metrics);
             } catch (Exception e) {
-                response = doRetry(method, args, e, startTime, providerMetadata, serviceMetadata);
+                metrics.errorComplete(e);
+                breaker.recordRpc(metrics);
+                response = doRetry(metrics, serviceMetadata);
             }
             return processResponse(response);
         }
 
+        // 选择熔断器关闭的provider
+        private ServiceMetadata decideProvider(List<ServiceMetadata> candidate) {
+            while (!candidate.isEmpty()) {
+                ServiceMetadata select = this.loadBalancer.select(candidate); // 通过负载均衡得到provider
+                CircuitBreaker breaker = circuitBreakerManager.createOrGetBreaker(select);
+                if (breaker.allowRequest()) {
+                    return select;
+                }
+                candidate.remove(select);
+            }
+            throw new RpcException("当前没有可提供服务的provider");
+        }
+
         // 重试
-        private Response doRetry(Method method, Object[] args, Exception e, long startTime, ServiceMetadata providerMetadata, List<ServiceMetadata> serviceMetadata) throws Exception {
+        private Response doRetry(RpcCallMetrics metrics, List<ServiceMetadata> serviceMetadata) throws Exception {
+            Throwable e = metrics.getThrowable();
             // 若异步任务失败的原因是“不允许重试”的RpcException，就直接抛出该异常
             if (e instanceof ExecutionException ee && ee.getCause() instanceof RpcException rpcException && !rpcException.retry()) {
                 throw rpcException;
             }
             Response response;
             // 重试逻辑
-            long methodTimeoutMs = consumerProperties.getMethodTimeoutMs() - (System.currentTimeMillis() - startTime);
+            long methodTimeoutMs = consumerProperties.getMethodTimeoutMs() - metrics.getDuration();
             if (methodTimeoutMs <= 0) {
                 throw new TimeoutException();
             }
-            log.warn("rpc出现异常进行重试", e);
+            log.warn("rpc出现异常，并进行重试", e);
+            RetryContext retryContext = createRetryContextFromFailMetrics(metrics, serviceMetadata, methodTimeoutMs);
+            response = this.retryPolicy.retry(retryContext);
+            return response;
+        }
+
+        // 构建重试上下文
+        private @NonNull RetryContext createRetryContextFromFailMetrics(RpcCallMetrics metrics, List<ServiceMetadata> serviceMetadata, long methodTimeoutMs) {
             RetryContext retryContext = new RetryContext();
-            retryContext.setFailService(providerMetadata);
+            retryContext.setFailService(metrics.getProvider());
             retryContext.setServiceMetadataList(serviceMetadata);
             retryContext.setMethodTimeoutMs(methodTimeoutMs);
             retryContext.setRequestTimeoutMs(consumerProperties.getRequestTimeoutMs());
             retryContext.setLoadBalancer(this.loadBalancer);
-            retryContext.setDoRpcFunction(provider -> callRpcAsync(buildRequst(method, args), provider));
-            response = this.retryPolicy.retry(retryContext);
-            return response;
+            retryContext.setDoRpcFunction(provider -> {
+                CircuitBreaker breaker = circuitBreakerManager.createOrGetBreaker(provider);
+                if (!breaker.allowRequest()) {
+                    CompletableFuture<Response> breakFuture = new CompletableFuture<>();
+                    breakFuture.completeExceptionally(new RpcException("provider熔断"));
+                    return breakFuture;
+                }
+                RpcCallMetrics retryMetrics = RpcCallMetrics.createRpcCallMetrics(metrics.getMethod(), metrics.getArgs(), metrics.getProvider());
+                CompletableFuture<Response> requestFuture = callRpcAsync(buildRequst(metrics.getMethod(), metrics.getArgs()), provider);
+                requestFuture.whenComplete((r, retryE) -> {
+                    if (null == retryE) {
+                        retryMetrics.complete(r);
+                    } else {
+                        retryMetrics.errorComplete(retryE);
+                    }
+                    breaker.recordRpc(retryMetrics);
+                });
+                return requestFuture;
+            });
+            return retryContext;
         }
 
         /**
