@@ -20,10 +20,9 @@ public class ConsumerApp {
         consumerProperties.setRegistryConfig(registryConfig);
         ConsumerProxyFactory consumerProxyFactory = new ConsumerProxyFactory(consumerProperties);
         Add addConsumer = consumerProxyFactory.createConsumerProxy(Add.class);
-        CyclicBarrier cyclicBarrier = new CyclicBarrier(10);
         while (true) {
-            Thread.sleep(300);
-            addConsumer.add(1, 2);
+            Thread.sleep(1000);
+            System.out.println(addConsumer.add(1, 2));
         }
 
 

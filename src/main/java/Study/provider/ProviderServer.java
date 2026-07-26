@@ -167,7 +167,7 @@ public class ProviderServer {
                 long startTime = System.currentTimeMillis();
                 Object result = invocation.invoke(request.getMethodName(), request.getParamsClass(),
                         request.getParams());
-                log.info("requestId:{}，函数被调用了{}，结果是{}，耗时是{}",
+                log.info("requestId:{}，{}，函数被调用了{}，结果是{}，耗时是{}ms",
                         request.getRequestId(),
                         request.getServiceName(),
                         request.getMethodName(),

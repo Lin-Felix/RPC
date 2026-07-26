@@ -21,7 +21,7 @@ public class RpcCallMetrics {
     // 以下属性为重试操作的参数，将10-Retry的参数移动到该类中
     private ServiceMetadata provider;
     private Method method;
-    private Object[] args;
+    private Object[] params;
 
     private Object result;
 
@@ -31,11 +31,11 @@ public class RpcCallMetrics {
     }
 
     // 知识点：通过私有构造函数，强制通过工厂模式创建并返回对象
-    public static RpcCallMetrics createRpcCallMetrics(Method method, Object[] args, ServiceMetadata provider) {
+    public static RpcCallMetrics createRpcCallMetrics(Method method, Object[] params, ServiceMetadata provider) {
         RpcCallMetrics metrics = new RpcCallMetrics();
         metrics.startTime = System.currentTimeMillis();
         metrics.method = method;
-        metrics.args = args;
+        metrics.params = params;
         metrics.provider = provider;
         return metrics;
     }

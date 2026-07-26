@@ -13,13 +13,13 @@ import java.util.concurrent.locks.LockSupport;
  */
 public class AddImpl implements Add {
     @Override
-    public int add(int a, int b) {
+    public Integer add(int a, int b) {
         LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1500));
         return a + b;
     }
 
     @Override
-    public int minus(int a, int b) {
+    public Integer minus(int a, int b) {
         return a - b;
     }
 }

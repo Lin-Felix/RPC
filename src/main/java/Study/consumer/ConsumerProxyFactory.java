@@ -5,6 +5,10 @@ import Study.breaker.CircuitBreakerManager;
 import Study.codec.RequestEncoder;
 import Study.codec.SSDecoder;
 import Study.exception.RpcException;
+import Study.fallback.CacheFallback;
+import Study.fallback.DefaultFallback;
+import Study.fallback.Fallback;
+import Study.fallback.MockFallback;
 import Study.limit.RateLimiter;
 import Study.loadbalance.LoadBalancer;
 import Study.loadbalance.RandomLoadBalancer;
@@ -53,15 +57,17 @@ import java.util.concurrent.TimeoutException;
 @Slf4j
 public class ConsumerProxyFactory {
 
-    private final ConnectionManager manager;
+    private final ConnectionManager manager; // 连接管理器
 
-    private final ServiceRegistry registry;
+    private final ServiceRegistry registry;// 注册中心
 
-    private final ConsumerProperties consumerProperties;
+    private final ConsumerProperties consumerProperties; // 消费者配置
 
-    private final InFlightRequestManager inFlightRequestManager;
+    private final InFlightRequestManager inFlightRequestManager; // 在途请求管理器
 
-    private final CircuitBreakerManager circuitBreakerManager;
+    private final CircuitBreakerManager circuitBreakerManager; // 熔断管理器
+
+    private final Fallback fallback; // 降级接口
 
     public ConsumerProxyFactory(ConsumerProperties consumerProperties) throws Exception {
         this.consumerProperties = consumerProperties;
@@ -70,6 +76,7 @@ public class ConsumerProxyFactory {
         this.registry.init(consumerProperties.getRegistryConfig());
         this.manager = new ConnectionManager(inFlightRequestManager, consumerProperties);
         this.circuitBreakerManager = new CircuitBreakerManager(consumerProperties);
+        this.fallback = new DefaultFallback(new CacheFallback(), new MockFallback());
     }
 
     /**
@@ -131,21 +138,31 @@ public class ConsumerProxyFactory {
             }
             List<ServiceMetadata> serviceMetadata = new ArrayList<>(registry.fetchServiceList(interfaceClass.getName())); // 从注册中心拿到服务元数据
             ServiceMetadata provider = decideProvider(serviceMetadata);
-            Request request = buildRequst(method, args);
-            Response response;
             RpcCallMetrics metrics = RpcCallMetrics.createRpcCallMetrics(method, args, provider);
+            // 13-降级处理
+            if (provider == null) {
+                return fallback.fallback(metrics);
+            }
+            Request request = buildRequst(method, args);
             CircuitBreaker breaker = circuitBreakerManager.createOrGetBreaker(provider);
+            // 10和12-重试处理 及 熔断处理
             try {
                 CompletableFuture<Response> requestFuture = callRpcAsync(request, provider); // 备注：callRpcAsync的responseFuture和requestFuture本质是一个东西
-                response = requestFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
+                Response response = requestFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
                 metrics.complete(response);
                 breaker.recordRpc(metrics);
+                fallback.recordMetrics(metrics);
+                return processResponse(response);
             } catch (Exception e) {
                 metrics.errorComplete(e);
                 breaker.recordRpc(metrics);
-                response = doRetry(metrics, serviceMetadata);
             }
-            return processResponse(response);
+            // 13-降级处理； todo 疑问：执行catch后还能向下执行吗
+            try {
+                return processResponse(doRetry(metrics, serviceMetadata));
+            } catch (Exception e) {
+                return fallback.fallback(metrics);
+            }
         }
 
         // 选择熔断器关闭的provider
@@ -158,7 +175,7 @@ public class ConsumerProxyFactory {
                 }
                 candidate.remove(select);
             }
-            throw new RpcException("当前没有可提供服务的provider");
+            return null; // 根据null值判断是否要进行兜底
         }
 
         // 重试
@@ -195,8 +212,8 @@ public class ConsumerProxyFactory {
                     breakFuture.completeExceptionally(new RpcException("provider熔断"));
                     return breakFuture;
                 }
-                RpcCallMetrics retryMetrics = RpcCallMetrics.createRpcCallMetrics(metrics.getMethod(), metrics.getArgs(), metrics.getProvider());
-                CompletableFuture<Response> requestFuture = callRpcAsync(buildRequst(metrics.getMethod(), metrics.getArgs()), provider);
+                RpcCallMetrics retryMetrics = RpcCallMetrics.createRpcCallMetrics(metrics.getMethod(), metrics.getParams(), metrics.getProvider());
+                CompletableFuture<Response> requestFuture = callRpcAsync(buildRequst(metrics.getMethod(), metrics.getParams()), provider);
                 requestFuture.whenComplete((r, retryE) -> {
                     if (null == retryE) {
                         retryMetrics.complete(r);
