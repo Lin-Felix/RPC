@@ -38,8 +38,8 @@ public class ProviderRegistry {
     }
 
     public static class Invocation<I> {
-        final I serviceInstance;
         final Class<I> interfaceClass; // 该字段确保能够调用方法，若没有该字段，当实现的方法为private或者class为private时，方法无法被调用，而接口则规定为public
+        final I serviceInstance; // 服务实例（即实现类对象）
 
         public Invocation(Class<I> interfaceClass, I serviceInstance) {
             this.interfaceClass = interfaceClass;
