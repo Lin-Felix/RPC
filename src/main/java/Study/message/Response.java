@@ -2,13 +2,15 @@ package Study.message;
 
 import lombok.Data;
 
+import java.io.Serializable;
+
 /**
  * @author lzk
  * @date 2026/6/25 16:55
  * @description
  */
 @Data
-public class Response {
+public class Response implements Serializable {
     private Object result;
     private int code;
     private String errorMessage;

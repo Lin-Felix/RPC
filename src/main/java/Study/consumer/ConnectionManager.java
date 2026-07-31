@@ -2,8 +2,13 @@ package Study.consumer;
 
 import Study.codec.RequestEncoder;
 import Study.codec.SSDecoder;
+import Study.codec.SSEncoder;
+import Study.compress.Compression;
+import Study.compress.CompressionManager;
 import Study.message.Response;
 import Study.register.ServiceMetadata;
+import Study.serialize.Serializer;
+import Study.serialize.SerializerManager;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -15,6 +20,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -33,10 +39,16 @@ public class ConnectionManager {
 
     private final ConsumerProperties properties;
 
+    private final SerializerManager serializerManager; // 序列化管理器
+
+    private final CompressionManager compressionManager; // 压缩器管理器
+
     public ConnectionManager(InFlightRequestManager inFlightRequestManager, ConsumerProperties properties) {
         this.inFlightRequestManager = inFlightRequestManager;
         this.bootstrap = creatBootStrap(properties);
         this.properties = properties;
+        this.serializerManager = new SerializerManager();
+        this.compressionManager = new CompressionManager();
     }
 
 
@@ -76,7 +88,7 @@ public class ConnectionManager {
                     protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                         nioSocketChannel.pipeline()
                                 .addLast(new SSDecoder())
-                                .addLast(new RequestEncoder())
+                                .addLast(new SSEncoder())
                                 .addLast(new ConsumerHandler());
                     }
                 });
@@ -92,6 +104,14 @@ public class ConnectionManager {
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             log.info("地址:{}连接了", ctx.channel().remoteAddress());
+            Serializer.SerializerType serializerType = Serializer.SerializerType.valueOf(properties.getSerialize().toUpperCase(Locale.ROOT));
+            ctx.channel().attr(SSEncoder.SERIALIZE_KEY).set(serializerType.getTypeCode()); // 对序列化器/压缩器、序列化管理器/压缩管理器进行初始化
+            ctx.channel().attr(SSEncoder.SERIALIZER_MANAGER_KEY).set(serializerManager);
+
+            Compression.CompressionType compressionType = Compression.CompressionType.valueOf(properties.getCompress().toUpperCase(Locale.ROOT));
+            ctx.channel().attr(SSEncoder.COMPRESS_KEY).set(compressionType.getCompressionCode());
+            ctx.channel().attr(SSEncoder.COMPRESS_MANAGER_KEY).set(compressionManager);
+            ctx.fireChannelActive();
         }
 
         @Override

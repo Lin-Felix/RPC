@@ -1,5 +1,8 @@
 package Study.provider;
 
+import Study.codec.SSEncoder;
+import Study.compress.Compression;
+import Study.compress.CompressionManager;
 import Study.limit.ConcurrencyLimiter;
 import Study.limit.Limiter;
 import Study.limit.RateLimiter;
@@ -11,6 +14,8 @@ import Study.register.DefaultServiceRegistry;
 import Study.register.RegistryConfig;
 import Study.register.ServiceMetadata;
 import Study.register.ServiceRegistry;
+import Study.serialize.Serializer;
+import Study.serialize.SerializerManager;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -19,16 +24,17 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author lzk
  * @date 2026/6/23 14:36
- * @description 提供者
+ * @description 服务提供者
  */
 @Slf4j
 public class ProviderServer {
-    private final ProviderProperties providerProperties;
+    private final ProviderProperties properties;
 
     private final ProviderRegistry registry; // 注册表
 
@@ -40,13 +46,18 @@ public class ProviderServer {
 
     private EventLoopGroup workerEventLoopGroup;
 
+    private final SerializerManager serializerManager; // 序列化管理器
+
+    private final CompressionManager compressionManager; // 压缩器管理器
 
 
-    public ProviderServer(ProviderProperties providerProperties) {
-        this.providerProperties = providerProperties;
+    public ProviderServer(ProviderProperties properties) {
+        this.properties = properties;
         this.registry = new ProviderRegistry();
         this.serviceRegistry = new DefaultServiceRegistry();
-        this.globalLimiter = new ConcurrencyLimiter(providerProperties.getGlobalMaxRequest());
+        this.globalLimiter = new ConcurrencyLimiter(properties.getGlobalMaxRequest());
+        this.serializerManager = new SerializerManager();
+        this.compressionManager = new CompressionManager();
     }
 
     // 将函数注册至注册表
@@ -58,9 +69,9 @@ public class ProviderServer {
     // 启动服务器
     public void start() {
         bossEventLoopGroup = new NioEventLoopGroup();
-        workerEventLoopGroup = new NioEventLoopGroup(providerProperties.getWorkThreadNum());
+        workerEventLoopGroup = new NioEventLoopGroup(properties.getWorkThreadNum());
         try {
-            this.serviceRegistry.init(providerProperties.getRegistryConfig()); // 注册中心初始化
+            this.serviceRegistry.init(properties.getRegistryConfig()); // 注册中心初始化
             ServerBootstrap serverBootstrap = new ServerBootstrap();
             serverBootstrap.group(bossEventLoopGroup, workerEventLoopGroup)
                     .channel(NioServerSocketChannel.class)
@@ -69,12 +80,12 @@ public class ProviderServer {
                         protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                             nioSocketChannel.pipeline()
                                     .addLast(new SSDecoder())
-                                    .addLast(new ResponseEncoder())
+                                    .addLast(new SSEncoder())
                                     .addLast(new LimiterHandler())
                                     .addLast(new ProviderHandler());
                         }
                     });
-            serverBootstrap.bind(providerProperties.getHost(), providerProperties.getPort()).sync();
+            serverBootstrap.bind(properties.getHost(), properties.getPort()).sync();
             // map(this::buildMetadata)等价于map(name -> buildMetadata(name))
             registry.allServiceName().stream().map(this::buildMetadata).forEach(this.serviceRegistry::registerService); // 将注册表的服务注册至注册中心中
         } catch (Exception e) {
@@ -84,8 +95,8 @@ public class ProviderServer {
 
     private ServiceMetadata buildMetadata(String serviceName) {
         ServiceMetadata serviceMetadata = new ServiceMetadata();
-        serviceMetadata.setHost(providerProperties.getHost());
-        serviceMetadata.setPort(providerProperties.getPort());
+        serviceMetadata.setHost(properties.getHost());
+        serviceMetadata.setPort(properties.getPort());
         serviceMetadata.setServiceName(serviceName);
         return serviceMetadata;
     }
@@ -137,7 +148,7 @@ public class ProviderServer {
         // 回调函数：连接建立时调用
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
-            RateLimiter rateLimiter = new RateLimiter(providerProperties.getPerConsumerMaxRequest());
+            RateLimiter rateLimiter = new RateLimiter(properties.getPerConsumerMaxRequest());
             ctx.channel().attr(CHANNEL_LIMITER_KEY).set(rateLimiter);
             ctx.channel().attr(GLOBAL_PERMITS).set(new AtomicInteger(0));
             ctx.fireChannelActive();
@@ -183,6 +194,14 @@ public class ProviderServer {
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             log.info("地址:{}连接了", ctx.channel().remoteAddress());
+            Serializer.SerializerType serializerType = Serializer.SerializerType.valueOf(properties.getSerialize().toUpperCase(Locale.ROOT));
+            ctx.channel().attr(SSEncoder.SERIALIZE_KEY).set(serializerType.getTypeCode());
+            ctx.channel().attr(SSEncoder.SERIALIZER_MANAGER_KEY).set(serializerManager);
+
+            Compression.CompressionType compressionType = Compression.CompressionType.valueOf(properties.getCompress().toUpperCase(Locale.ROOT));
+            ctx.channel().attr(SSEncoder.COMPRESS_KEY).set(compressionType.getCompressionCode());
+            ctx.channel().attr(SSEncoder.COMPRESS_MANAGER_KEY).set(compressionManager);
+            ctx.fireChannelActive();
         }
 
         @Override
