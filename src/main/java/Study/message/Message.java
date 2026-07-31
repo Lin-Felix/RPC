@@ -29,9 +29,10 @@ public class Message {
     public enum MessageType { // 避免代码中出现魔法值
         REQUEST(1, Request.class), RESPONSE(2, Response.class), ;
 
-        private final byte code; // 消息类的编码
+        private final byte code; // 消息类的编号
         private Class<?> messageClass; // 消息类被反序列化后的类的Class对象
         private static final Map<Class<?>, MessageType> CLASS_CACHE = new HashMap<>();
+        private static final Map<Byte, MessageType> CODE_CACHE = new HashMap<>();
 
         MessageType(int code, Class<?> messageClass) {
             this.code = (byte) code;
@@ -42,6 +43,9 @@ public class Message {
             for (MessageType value : MessageType.values()) {
                 if (CLASS_CACHE.put(value.messageClass, value) != null) {
                     throw new IllegalArgumentException(value + "没有唯一对应消息类");
+                }
+                if (CODE_CACHE.put(value.getCode(), value) != null) {
+                    throw new IllegalArgumentException(value + "没有对应的编号");
                 }
             }
 
@@ -55,8 +59,19 @@ public class Message {
             return messageClass;
         }
 
-        public MessageType ofMessageClass(Class<?> messageClass) {
+        public static MessageType ofMessageClass(Class<?> messageClass) {
             return CLASS_CACHE.get(messageClass);
+            // 使用Map<Class<?>, MessageType> CLASS_CACHE保存的原因，避免每次调用该函数时，都要执行以下代码（即每次都要遍历）
+            /*for (MessageType value : MessageType.values()) {
+                if (value.getMessageClass().equals(messageClass)) {
+                    return value;
+                }
+            }
+            return null;*/
+        }
+
+        public static MessageType ofCode(Byte messageCode) {
+            return CODE_CACHE.get(messageCode);
         }
     }
 }

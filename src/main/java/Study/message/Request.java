@@ -1,7 +1,9 @@
 package Study.message;
 
+import Study.serialize.Serializer;
 import lombok.Data;
 
+import java.io.Serializable;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -10,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @description
  */
 @Data
-public class Request {
+public class Request implements Serializable {
 
     private static final AtomicInteger REQUEST_COUNTER = new AtomicInteger(); // 全局计数器
 
