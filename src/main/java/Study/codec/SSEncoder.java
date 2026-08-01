@@ -80,7 +80,7 @@ public class SSEncoder extends MessageToByteEncoder {
         }
 
         Integer serializeCode = ctx.channel().attr(SERIALIZE_KEY).get();
-        SerializerManager serializerManager = ctx.channel().attr(SERIALIZER_MANAGER_KEY).get(); // attr()的返回类型是Attribute<T>，get()的返回值是T
+        SerializerManager serializerManager = ctx.channel().attr(SERIALIZER_MANAGER_KEY).get();
         defaultSerializer = serializerManager.getSerializer(serializeCode);
 
         Integer compressCode = ctx.channel().attr(COMPRESS_KEY).get();

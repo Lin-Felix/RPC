@@ -72,7 +72,7 @@ public class SSDecoder extends LengthFieldBasedFrameDecoder {
             }
             byte[] body = new byte[frame.readableBytes()];
             frame.readBytes(body);
-            body = compression.decompress(body);
+            compression.decompress(body);
             Message.MessageType type = Message.MessageType.ofCode(messageType);
             if (type == null) {
                 throw new IllegalArgumentException("不支持的消息类型" + messageType);
