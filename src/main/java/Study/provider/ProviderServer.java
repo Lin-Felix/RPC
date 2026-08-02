@@ -3,6 +3,8 @@ package Study.provider;
 import Study.codec.SSEncoder;
 import Study.compress.Compression;
 import Study.compress.CompressionManager;
+import Study.handler.HeartbeatHandler;
+import Study.handler.TrafficRecordHandler;
 import Study.limit.ConcurrencyLimiter;
 import Study.limit.Limiter;
 import Study.limit.RateLimiter;
@@ -21,10 +23,12 @@ import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -79,9 +83,12 @@ public class ProviderServer {
                         @Override
                         protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                             nioSocketChannel.pipeline()
+                                    .addLast(new TrafficRecordHandler())
                                     .addLast(new SSDecoder())
                                     .addLast(new SSEncoder())
-                                    .addLast(new LimiterHandler())
+                                    .addLast(new IdleStateHandler(30, 5, 0, TimeUnit.SECONDS)) // 心跳检测处理器：30秒内没有接收到数据，则触发读空闲事件; 5秒内没有发送数据，则触发写空闲事件; 避免在RPC请求频发时发送心跳消息
+                                    .addLast(new HeartbeatHandler()) // 心跳处理器
+                                    .addLast(new LimiterHandler()) // 限流处理器
                                     .addLast(new ProviderHandler());
                         }
                     });
@@ -160,7 +167,7 @@ public class ProviderServer {
         public void channelInactive(ChannelHandlerContext ctx) throws Exception {
             int remain = ctx.channel().attr(GLOBAL_PERMITS).get().getAndSet(0);
             globalLimiter.release(remain);
-            ctx.fireChannelActive();
+            ctx.fireChannelInactive();
         }
     }
 

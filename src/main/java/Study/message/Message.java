@@ -27,7 +27,11 @@ public class Message {
 
 
     public enum MessageType { // 避免代码中出现魔法值
-        REQUEST(1, Request.class), RESPONSE(2, Response.class), ;
+        REQUEST(1, Request.class),
+        RESPONSE(2, Response.class),
+        HEARTBEAT_REQUEST(3, HeartbeatRequest.class),
+        HEARTBEAT_RESPONSE(4,HeartbeatResponse.class),
+        ;
 
         private final byte code; // 消息类的编号
         private Class<?> messageClass; // 消息类被反序列化后的类的Class对象

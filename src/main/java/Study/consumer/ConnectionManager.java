@@ -5,6 +5,8 @@ import Study.codec.SSDecoder;
 import Study.codec.SSEncoder;
 import Study.compress.Compression;
 import Study.compress.CompressionManager;
+import Study.handler.HeartbeatHandler;
+import Study.handler.TrafficRecordHandler;
 import Study.message.Response;
 import Study.register.ServiceMetadata;
 import Study.serialize.Serializer;
@@ -18,11 +20,13 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.timeout.IdleStateHandler;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author lzk
@@ -87,8 +91,11 @@ public class ConnectionManager {
                     @Override
                     protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                         nioSocketChannel.pipeline()
+                                .addLast(new TrafficRecordHandler())
                                 .addLast(new SSDecoder())
                                 .addLast(new SSEncoder())
+                                .addLast(new IdleStateHandler(30,5,0, TimeUnit.SECONDS)) // 心跳检测处理器：30秒内没有接收到数据，则触发读空闲事件; 5秒内没有发送数据，则触发写空闲事件; 避免在RPC请求频发时发送心跳消息
+                                .addLast(new HeartbeatHandler()) // 心跳处理器
                                 .addLast(new ConsumerHandler());
                     }
                 });
