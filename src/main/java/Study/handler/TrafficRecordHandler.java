@@ -16,9 +16,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * 从11:19开始听
  */
 public class TrafficRecordHandler extends ChannelDuplexHandler {
-    public static final AttributeKey<TrafficRecord> RECORD_ATTRIBUTE_KEY = AttributeKey.valueOf("traffic_record");
+    public static final AttributeKey<TrafficRecord> RECORD_ATTRIBUTE_KEY = AttributeKey.valueOf("traffic_record"); // TrafficRecord保存在Attribute中，便于跨Handler共享
 
-    private TrafficRecord trafficRecord; // 便于更快查找，避免每次.channel().attr().get(); 类似属性中使用Map作为缓存的效果
+    private TrafficRecord trafficRecord; // 便于更快查找，避免每次.channel().attr().get(); 类似属性中使用Map作为本地缓存
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
@@ -47,7 +47,10 @@ public class TrafficRecordHandler extends ChannelDuplexHandler {
         super.channelActive(ctx);
     }
 
-    private class TrafficRecord {
+    // 流量记录类：记录上下行流量
+    // static的原因：内部类没有使用到外部类的属性、方法
+    // 好处：避免内存泄露；引用链: TrafficRecordHandler -> trafficRecord -> this$0(表示非静态内部类持有外部类实例的引用) -> TrafficRecordHandler (循环引用，不可回收，导致内存泄露)
+    private static class TrafficRecord {
         private AtomicLong download = new AtomicLong(); // 因为没有在构造函数中实例化，因为在属性定义时进行new
 
         private AtomicLong upload = new AtomicLong();
