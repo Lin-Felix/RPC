@@ -28,6 +28,10 @@ import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Locale;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -54,6 +58,8 @@ public class ProviderServer {
 
     private final CompressionManager compressionManager; // 压缩器管理器
 
+    private ThreadPoolExecutor invokeExecutor; // 线程池：提高读写吞吐量
+
 
     public ProviderServer(ProviderProperties properties) {
         this.properties = properties;
@@ -62,6 +68,13 @@ public class ProviderServer {
         this.globalLimiter = new ConcurrencyLimiter(properties.getGlobalMaxRequest());
         this.serializerManager = new SerializerManager();
         this.compressionManager = new CompressionManager();
+        this.invokeExecutor = new ThreadPoolExecutor(
+                4,
+                4,
+                10,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(1),
+                new FastFailResponseHandler());
     }
 
     // 将函数注册至注册表
@@ -173,30 +186,18 @@ public class ProviderServer {
 
     public class ProviderHandler extends SimpleChannelInboundHandler<Request> {
         @Override
-        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Request request) throws Exception {
+        protected void channelRead0(ChannelHandlerContext ctx, Request request) throws Exception {
             ProviderRegistry.Invocation<?> invocation = registry.findService(request.getServiceName()); //
             // 从注册表获取服务实例（即类实例）
             if (null == invocation) {
                 Response failResp = Response.fail(String.format("%s 没有对应的服务", request.getServiceName()), request.getRequestId());
-                channelHandlerContext.writeAndFlush(failResp);
+                ctx.writeAndFlush(failResp);
                 return;
             }
-            try {
-                long startTime = System.currentTimeMillis();
-                Object result = invocation.invoke(request.getMethodName(), request.getParamsClass(),
-                        request.getParams());
-                log.info("requestId:{}，{}，函数被调用了{}，结果是{}，耗时是{}ms",
-                        request.getRequestId(),
-                        request.getServiceName(),
-                        request.getMethodName(),
-                        result,
-                        System.currentTimeMillis() - startTime);
-                channelHandlerContext.writeAndFlush(Response.success(result, request.getRequestId()));
-            } catch (Exception e) {
-                Response failResp = Response.fail(e.getMessage(), request.getRequestId());
-                channelHandlerContext.writeAndFlush(failResp);
-            }
+            // 复习：execute(Runnable command)中参数表示一个任务，用lambda表达式书写，()->{}
+            invokeExecutor.execute(new InvokeTask(request, ctx, invocation));
         }
+
 
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
@@ -221,6 +222,57 @@ public class ProviderServer {
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
             log.error("发生了异常", cause);
             ctx.channel().close();
+        }
+    }
+
+    private static class FastFailResponseHandler implements RejectedExecutionHandler {
+
+        // 由于入参为Runnable，便将线程池操作封装为Runnalbe
+        @Override
+        public void rejectedExecution(Runnable task, ThreadPoolExecutor executor) {
+            if (task instanceof InvokeTask invokeTask) {
+                Response fastFail = Response.fail("服务器繁忙", invokeTask.request.getRequestId());
+                invokeTask.ctx.writeAndFlush(fastFail);
+                return;
+            }
+            throw new RuntimeException("你的task 有问题！");
+        }
+    }
+
+    private static class InvokeTask implements Runnable {
+        private final Request request;
+        private final ChannelHandlerContext ctx;
+        private final ProviderRegistry.Invocation<?> invocation;
+
+        InvokeTask(Request request, ChannelHandlerContext ctx, ProviderRegistry.Invocation<?> invocation) {
+            this.request = request;
+            this.ctx = ctx;
+            this.invocation = invocation;
+        }
+
+        @Override
+        public void run() {
+            // 使EventLoop仅执行IO操作，线程池的线程执行业务逻辑（即invoke()调用）
+            EventLoop eventLoop = ctx.channel().eventLoop();
+            try {
+                long startTime = System.currentTimeMillis();
+                Object result = invocation.invoke(request.getMethodName(), request.getParamsClass(),
+                        request.getParams());
+                log.info("requestId:{}，{}，函数被调用了{}，结果是{}，耗时是{}ms",
+                        request.getRequestId(),
+                        request.getServiceName(),
+                        request.getMethodName(),
+                        result,
+                        System.currentTimeMillis() - startTime);
+                eventLoop.execute(() -> {
+                    ctx.writeAndFlush(Response.success(result, request.getRequestId()));
+                });
+            } catch (Exception e) {
+                eventLoop.execute(() -> {
+                    Response failResp = Response.fail(e.getMessage(), request.getRequestId());
+                    ctx.writeAndFlush(failResp);
+                });
+            }
         }
     }
 

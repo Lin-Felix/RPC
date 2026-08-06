@@ -3,8 +3,8 @@ package Study.consumer;
 import Study.api.Add;
 import Study.register.RegistryConfig;
 
-import java.util.concurrent.BrokenBarrierException;
-import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 /**
  * @author lzk
@@ -20,10 +20,26 @@ public class ConsumerApp {
         consumerProperties.setRegistryConfig(registryConfig);
         ConsumerProxyFactory consumerProxyFactory = new ConsumerProxyFactory(consumerProperties);
         Add addConsumer = consumerProxyFactory.createConsumerProxy(Add.class);
-        while (true) {
-            Thread.sleep(1000);
-            System.out.println(addConsumer.add(1, 2));
+
+        System.out.println(addConsumer.add(1, 2));
+        for (int i = 0; i < 10; i++) {
+            new Thread(() -> {
+                while (true) {
+                    LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(1));
+                    long startTime = System.currentTimeMillis();
+                    System.out.println(addConsumer.add(1, 2) + " " + (System.currentTimeMillis() - startTime) + "毫秒");
+                }
+            }).start();
         }
+
+
+        new Thread(() -> {
+            while (true) {
+                LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(1));
+                long startTime = System.currentTimeMillis();
+                System.out.println(addConsumer.minus(1, 2) + " " + (System.currentTimeMillis() - startTime) + "毫秒");
+            }
+        }).start();
 
 
     }
