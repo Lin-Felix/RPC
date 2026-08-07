@@ -1,7 +1,9 @@
 package Study.compress;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.ServiceLoader;
 
 /**
  * @author lzk
@@ -9,18 +11,33 @@ import java.util.Map;
  * @description
  */
 public class CompressionManager {
-    private final Map<Integer, Compression> compressionMap = new HashMap<>();
+    private final Map<Integer, Compression> codeMap = new HashMap<>();
+
+    private final Map<String, Compression> nameMap = new HashMap<>();
 
     public CompressionManager() {
         init();
     }
 
-    public Compression getCompression(int typeCode) {
-        return compressionMap.get(typeCode);
+    public Compression getCompression(int code) {
+        return codeMap.get(code);
+    }
+
+    public Compression getCompression(String name) {
+        return nameMap.get(name.toUpperCase(Locale.ROOT));
     }
 
     public void init() {
-        compressionMap.put(Compression.CompressionType.NONE.getCompressionCode(), new NoneCompression());
-        compressionMap.put(Compression.CompressionType.GZIP.getCompressionCode(), new GzipCompression());
+        for (Compression compression : ServiceLoader.load(Compression.class)) {
+            if (codeMap.put(compression.code(),compression) != null) {
+                throw new IllegalArgumentException("压缩器的code重复");
+            }
+            if (compression.code() >= 16) {
+                throw new IllegalArgumentException("压缩器code不能超过15");
+            }
+            if (nameMap.put(compression.getName().toUpperCase(Locale.ROOT),compression) != null) {
+                throw new IllegalArgumentException("压缩器的名字重复");
+            }
+        }
     }
 }

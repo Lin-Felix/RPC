@@ -3,6 +3,7 @@ package Study.retry;
 import Study.exception.RpcException;
 import Study.message.Response;
 import Study.register.ServiceMetadata;
+import Study.spi.Spi;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.concurrent.TimeUnit;
  * @date 2026/7/8 17:32
  * @description 重试策略：故障转移
  */
+@Spi("failover")
 public class FailoverRetryPolicy implements RetryPolicy {
     @Override
     public Response retry(RetryContext context) throws Exception {

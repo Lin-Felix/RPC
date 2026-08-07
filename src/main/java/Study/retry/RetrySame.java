@@ -2,6 +2,7 @@ package Study.retry;
 
 import Study.exception.RpcException;
 import Study.message.Response;
+import Study.spi.Spi;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Random;
@@ -15,6 +16,7 @@ import java.util.concurrent.TimeoutException;
  * @date 2026/7/8 16:12
  * @description 重试策略：指数退避
  */
+@Spi("retrySame")
 @Slf4j
 public class RetrySame implements RetryPolicy {
     private final int retryMax = 3;

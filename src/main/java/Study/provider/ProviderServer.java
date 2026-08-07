@@ -202,12 +202,10 @@ public class ProviderServer {
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             log.info("地址:{}连接了", ctx.channel().remoteAddress());
-            Serializer.SerializerType serializerType = Serializer.SerializerType.valueOf(properties.getSerialize().toUpperCase(Locale.ROOT));
-            ctx.channel().attr(SSEncoder.SERIALIZE_KEY).set(serializerType.getTypeCode());
+            ctx.channel().attr(SSEncoder.SERIALIZE_KEY).set(properties.getSerialize());
             ctx.channel().attr(SSEncoder.SERIALIZER_MANAGER_KEY).set(serializerManager);
 
-            Compression.CompressionType compressionType = Compression.CompressionType.valueOf(properties.getCompress().toUpperCase(Locale.ROOT));
-            ctx.channel().attr(SSEncoder.COMPRESS_KEY).set(compressionType.getCompressionCode());
+            ctx.channel().attr(SSEncoder.COMPRESS_KEY).set(properties.getCompress());
             ctx.channel().attr(SSEncoder.COMPRESS_MANAGER_KEY).set(compressionManager);
             ctx.fireChannelActive();
         }

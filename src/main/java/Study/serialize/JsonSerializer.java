@@ -19,4 +19,14 @@ public class JsonSerializer implements Serializer {
         String jsonString = new String(bytes, StandardCharsets.UTF_8);
         return JSONObject.parseObject(jsonString, objectClass, JSONReader.Feature.SupportClassForName); // 第三个参数的作用：将字符串转对象时当对象中有class属性时使用
     }
+
+    @Override
+    public String getName() {
+        return "json";
+    }
+
+    @Override
+    public int code() {
+        return 0;
+    }
 }

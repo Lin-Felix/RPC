@@ -3,6 +3,7 @@ package Study.retry;
 import Study.exception.RpcException;
 import Study.message.Response;
 import Study.register.ServiceMetadata;
+import Study.spi.Spi;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.concurrent.TimeUnit;
  * @date 2026/7/8 17:42
  * @description 重试接口的实现类：请求对冲重试
  */
+@Spi("forking")
 public class ForkingRetryPolicy implements RetryPolicy {
     @Override
     public Response retry(RetryContext context) throws Exception {

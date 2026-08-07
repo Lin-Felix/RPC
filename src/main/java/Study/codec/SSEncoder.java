@@ -15,16 +15,16 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * @author lzk
  * @date 2026/7/30 19:48
- * @description 和最终代码不一样，没有实现 且 没有记录笔记中
+ * @description
  */
 @Slf4j
 public class SSEncoder extends MessageToByteEncoder {
 
-    public static final AttributeKey<Integer> SERIALIZE_KEY = AttributeKey.valueOf("serializeKey");
+    public static final AttributeKey<String> SERIALIZE_KEY = AttributeKey.valueOf("serializeKey");
     public static final AttributeKey<SerializerManager> SERIALIZER_MANAGER_KEY = AttributeKey.valueOf(
             "serializeManagerKey");
 
-    public static final AttributeKey<Integer> COMPRESS_KEY = AttributeKey.valueOf("compressKey");
+    public static final AttributeKey<String> COMPRESS_KEY = AttributeKey.valueOf("compressKey");
     public static final AttributeKey<CompressionManager> COMPRESS_MANAGER_KEY = AttributeKey.valueOf(
             "compressManagerKey");
 
@@ -75,17 +75,17 @@ public class SSEncoder extends MessageToByteEncoder {
     }
 
     private void initIfNecessary(ChannelHandlerContext ctx) {
-        if (null != defaultSerializer) {
+        if (null != defaultSerializer && defaultCompression != null) {
             return;
         }
 
-        Integer serializeCode = ctx.channel().attr(SERIALIZE_KEY).get();
+        String serializeKey = ctx.channel().attr(SERIALIZE_KEY).get();
         SerializerManager serializerManager = ctx.channel().attr(SERIALIZER_MANAGER_KEY).get(); // attr()返回类型是Attribute<T>，get()的返回类型是T
-        defaultSerializer = serializerManager.getSerializer(serializeCode);
+        defaultSerializer = serializerManager.getSerializer(serializeKey);
 
-        Integer compressCode = ctx.channel().attr(COMPRESS_KEY).get();
+        String compressKey = ctx.channel().attr(COMPRESS_KEY).get();
         CompressionManager compressionManager = ctx.channel().attr(COMPRESS_MANAGER_KEY).get();
-        defaultCompression = compressionManager.getCompression(compressCode);
+        defaultCompression = compressionManager.getCompression(compressKey);
 
         if (null == defaultSerializer) {
             throw new IllegalArgumentException("不存在默认的序列化器");
@@ -95,7 +95,7 @@ public class SSEncoder extends MessageToByteEncoder {
             throw new IllegalArgumentException("不存在默认的压缩器");
         }
 
-        defaultSerializeAndCompress = (byte) (serializeCode << 4 | compressCode);
+        defaultSerializeAndCompress = (byte) ((defaultSerializer.code() << 4) | defaultCompression.code());
     }
 
     // 由于以下三个函数均要从ctx.channel中得到Attribute值，故抽象为initIfNessary()和defaultSerializer属性

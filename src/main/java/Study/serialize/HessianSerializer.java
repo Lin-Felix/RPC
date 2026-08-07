@@ -36,4 +36,13 @@ public class HessianSerializer implements Serializer {
         }
     }
 
+    @Override
+    public String getName() {
+        return "hessian";
+    }
+
+    @Override
+    public int code() {
+        return 1;
+    }
 }
