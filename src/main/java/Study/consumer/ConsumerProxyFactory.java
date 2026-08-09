@@ -138,16 +138,23 @@ public class ConsumerProxyFactory {
             if (method.getDeclaringClass() == Object.class) {
                 return invokeObjectMethod(proxy, method, args);
             }
-            List<ServiceMetadata> serviceMetadata = new ArrayList<>(registry.fetchServiceList(interfaceClass.getName())); // 从注册中心拿到服务元数据
+            // 第一步: 判断是否是泛化调用
+            boolean genericInvoke = method.getName().equals("$invoke");
+            String serviceName = genericInvoke ? args[0].toString() : interfaceClass.getName(); // 服务名，本质是类名
+
+            // 第二步：从注册中心得到服务元数据
+            List<ServiceMetadata> serviceMetadata = new ArrayList<>(registry.fetchServiceList(serviceName));
             ServiceMetadata provider = decideProvider(serviceMetadata);
             RpcCallMetrics metrics = RpcCallMetrics.createRpcCallMetrics(method, args, provider);
-            // 13-降级处理
+
+            // 第三步：13-降级处理
             if (provider == null) {
                 return fallback.fallback(metrics);
             }
-            Request request = buildRequst(method, args);
+            Request request = buildRequest(method, args);
+
+            // 第四步：10和12-重试处理 及 熔断处理
             CircuitBreaker breaker = circuitBreakerManager.createOrGetBreaker(provider);
-            // 10和12-重试处理 及 熔断处理
             try {
                 CompletableFuture<Response> requestFuture = callRpcAsync(request, provider); // 备注：callRpcAsync的responseFuture和requestFuture本质是一个东西
                 Response response = requestFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
@@ -215,7 +222,7 @@ public class ConsumerProxyFactory {
                     return breakFuture;
                 }
                 RpcCallMetrics retryMetrics = RpcCallMetrics.createRpcCallMetrics(metrics.getMethod(), metrics.getParams(), metrics.getProvider());
-                CompletableFuture<Response> requestFuture = callRpcAsync(buildRequst(metrics.getMethod(), metrics.getParams()), provider);
+                CompletableFuture<Response> requestFuture = callRpcAsync(buildRequest(metrics.getMethod(), metrics.getParams()), provider);
                 requestFuture.whenComplete((r, retryE) -> {
                     if (null == retryE) {
                         retryMetrics.complete(r);
@@ -264,12 +271,22 @@ public class ConsumerProxyFactory {
             throw new RpcException(response.getErrorMessage());
         }
 
-        private Request buildRequst(Method method, Object[] args) {
+        private Request buildRequest(Method method, Object[] args) {
+            boolean genericInvoke = method.getName().equals("$invoke");
             Request request = new Request();
-            request.setServiceName(interfaceClass.getName());
-            request.setMethodName(method.getName());
-            request.setParams(args);
-            request.setParamsClass(method.getParameterTypes());
+            request.setGenericInvoke(genericInvoke);
+            if (genericInvoke) {
+                request.setServiceName(args[0].toString());
+                request.setMethodName(args[1].toString());
+                request.setParamsClassStr((String[]) args[2]);
+                request.setParams((Object[]) args[3]);
+            } else {
+                request.setServiceName(interfaceClass.getName());
+                request.setMethodName(method.getName());
+                request.setParams(args);
+                request.setParamsClass(method.getParameterTypes());
+            }
+
             return request;
         }
 

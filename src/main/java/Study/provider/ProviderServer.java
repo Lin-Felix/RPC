@@ -18,6 +18,7 @@ import Study.register.ServiceMetadata;
 import Study.register.ServiceRegistry;
 import Study.serialize.Serializer;
 import Study.serialize.SerializerManager;
+import com.alibaba.fastjson2.JSONObject;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -27,7 +28,10 @@ import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionHandler;
@@ -42,6 +46,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 public class ProviderServer {
+    private static final Set<Class<?>> NO_RESOLVE_CLASS_SET = Set.of(int.class,String.class,Integer.class); // 无需解析的类型
+
     private final ProviderProperties properties;
 
     private final ProviderRegistry registry; // 注册表
@@ -185,6 +191,7 @@ public class ProviderServer {
     }
 
     public class ProviderHandler extends SimpleChannelInboundHandler<Request> {
+        // Channel读取数据 触发Handler链，通过ctx.fireChannelRead()，依次传播到每个Handler的channelRead0
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, Request request) throws Exception {
             ProviderRegistry.Invocation<?> invocation = registry.findService(request.getServiceName()); //
@@ -254,16 +261,20 @@ public class ProviderServer {
             EventLoop eventLoop = ctx.channel().eventLoop();
             try {
                 long startTime = System.currentTimeMillis();
-                Object result = invocation.invoke(request.getMethodName(), request.getParamsClass(),
-                        request.getParams());
+                Class<?>[] paramsType = resolveMethodParamsType(request);
+                Object result = invocation.invoke(
+                        request.getMethodName(),
+                        paramsType,
+                        resolveMethodParams(request, paramsType));
                 log.info("requestId:{}，{}，函数被调用了{}，结果是{}，耗时是{}ms",
                         request.getRequestId(),
                         request.getServiceName(),
                         request.getMethodName(),
                         result,
                         System.currentTimeMillis() - startTime);
+                Object finalResult = request.isGenericInvoke() ? resolveResult(result) : result;
                 eventLoop.execute(() -> {
-                    ctx.writeAndFlush(Response.success(result, request.getRequestId()));
+                    ctx.writeAndFlush(Response.success(finalResult, request.getRequestId()));
                 });
             } catch (Exception e) {
                 eventLoop.execute(() -> {
@@ -271,6 +282,78 @@ public class ProviderServer {
                     ctx.writeAndFlush(failResp);
                 });
             }
+        }
+
+        /**
+         * 解析方法参数类型
+         * - 非泛化调用：直接返回已有的 Class 数组
+         * - 泛化调用：从类名字符串数组解析为 Class 数组
+         * @param request
+         * @return
+         * @throws ClassNotFoundException
+         */
+        private Class<?>[] resolveMethodParamsType(Request request) throws ClassNotFoundException {
+            if (!request.isGenericInvoke()) {
+                return request.getParamsClass();
+            }
+            String[] paramsClassStr = request.getParamsClassStr();
+            Class<?>[] result = new Class[paramsClassStr.length];
+
+            for (int i = 0; i < paramsClassStr.length; i++) {
+                String classStr = paramsClassStr[i];
+                result[i] = analysisFromString(classStr);
+            }
+
+            return result;
+        }
+
+        private Class<?> analysisFromString(String classStr) throws ClassNotFoundException {
+            if (classStr.equals("int")) {
+                return int.class;
+            }
+            return Class.forName(classStr);
+        }
+
+        /**
+         * 解析并转换方法参数为实际调用所需的类型
+         * - 非泛化调用：直接返回原始参数
+         * - 泛化调用：将 Map 类型参数转换为目标对象类型
+         * @param request
+         * @param paramsType
+         * @return
+         */
+        private Object[] resolveMethodParams(Request request, Class<?>[] paramsType) {
+            if (!request.isGenericInvoke()) {
+                return request.getParams();
+            }
+            Object[] params = request.getParams();
+            Object[] result = new Object[params.length];
+
+            for (int i = 0; i < params.length; i++) {
+                if (params[i] instanceof Map) {
+                    result[i] = new JSONObject((Map) params[i]).toJavaObject(paramsType[i]); // 转换为paramsType[i]类型的对象
+                } else {
+                    result[i] = params[i];
+                }
+            }
+            return result;
+        }
+
+        // todo: 实现各种类型的转换
+        /**
+         * 将方法返回值转换为泛化调用可用的类型
+         * - 简单类型（基本类型、String 等）：直接返回
+         * - 复杂对象：转换为 HashMap，便于客户端在无接口类的情况下访问
+         *
+         * @param result 方法执行的返回值
+         * @return 泛化调用可序列化的返回值（简单类型或 Map）
+         */
+        private Object resolveResult(Object result) {
+            Class<?> resultClass = result.getClass();
+            if (NO_RESOLVE_CLASS_SET.contains(resultClass)) {
+                return result;
+            }
+            return new HashMap<>(JSONObject.from(result));
         }
     }
 
